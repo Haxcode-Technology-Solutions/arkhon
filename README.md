@@ -210,42 +210,139 @@ arkhon/
 └── README.md
 ```
 
-## 🚀 Installation
+## 🚀 Installation & Configuration
 
 ### Prerequisites
-- Docker & Docker Compose (recommended)
-- OR:
-  - Python 3.11+
-  - Node.js 20+
-  - PostgreSQL 14+
-  - Redis 7+
 
-### Option 1: Docker (Recommended)
+**For Local Development (Docker):**
+- Docker Engine 20.10+
+- Docker Compose 2.0+
+- Git
 
-1. **Clone the repository**
+**For Manual Installation:**
+- Python 3.11+
+- Node.js 20+
+- PostgreSQL 14+ or MySQL 8+
+- Redis 7+
+- Git
+
+**For Production Server:**
+- Ubuntu 20.04+ / Debian 11+ / CentOS 8+
+- Docker & Docker Compose
+- Domain name (optional but recommended)
+- SSL certificate (Let's Encrypt recommended)
+
+---
+
+## 📦 Local Installation with Docker
+
+This is the **recommended** method for local development and testing.
+
+### Step 1: Clone the Repository
+
 ```bash
-git clone <repository-url>
+git clone https://github.com/your-org/arkhon.git
 cd arkhon
 ```
 
-2. **Configure environment**
+### Step 2: Configure Environment Variables
+
 ```bash
+# Copy the example environment file
 cp backend/.env.example backend/.env
-# Edit backend/.env with your settings
 ```
 
-3. **Start services**
+Edit `backend/.env` with your preferred text editor:
+
 ```bash
+nano backend/.env
+# or
+vim backend/.env
+# or
+code backend/.env
+```
+
+**Required Configuration:**
+
+```env
+# Application
+APP_NAME=Arkhon Integration Platform
+DEBUG=True  # Set to False in production
+
+# Security (CHANGE THIS!)
+SECRET_KEY=your-super-secret-key-change-this-in-production-use-at-least-32-chars
+ALGORITHM=HS256
+ACCESS_TOKEN_EXPIRE_MINUTES=30
+REFRESH_TOKEN_EXPIRE_DAYS=7
+
+# Database (Docker defaults)
+DATABASE_URL=postgresql+asyncpg://arkhon:arkhon_password@postgres:5432/arkhon
+
+# Redis (Docker defaults)
+REDIS_URL=redis://redis:6379/0
+CELERY_BROKER_URL=redis://redis:6379/0
+CELERY_RESULT_BACKEND=redis://redis:6379/0
+
+# CORS (Allow frontend access)
+BACKEND_CORS_ORIGINS=["http://localhost:3000","http://localhost:5173"]
+
+# File Storage
+STORAGE_TYPE=local
+LOCAL_STORAGE_PATH=./storage
+
+# FTP Settings (Configure for your data source)
+BIGBUY_FTP_HOST=ftp.bigbuy.eu
+BIGBUY_FTP_PORT=21
+BIGBUY_FTP_USER=your-ftp-username
+BIGBUY_FTP_PASSWORD=your-ftp-password
+BIGBUY_FTP_PATH=/products
+
+# Import Settings
+CSV_CHUNK_SIZE=1000
+MAX_IMPORT_ERRORS=100
+
+# Logging
+LOG_LEVEL=INFO
+LOG_FORMAT=json
+```
+
+**Generate a secure SECRET_KEY:**
+```bash
+python -c "import secrets; print(secrets.token_urlsafe(32))"
+```
+
+### Step 3: Start All Services
+
+```bash
+# Start all containers in detached mode
 docker-compose up -d
+
+# Verify all services are running
+docker-compose ps
 ```
 
-4. **Run migrations**
+You should see 6 services running:
+- `arkhon-postgres` (Database)
+- `arkhon-redis` (Cache/Queue)
+- `arkhon-backend` (FastAPI)
+- `arkhon-celery-worker` (Background tasks)
+- `arkhon-celery-beat` (Scheduler)
+- `arkhon-frontend` (React app)
+
+### Step 4: Initialize Database
+
 ```bash
+# Run database migrations
 docker-compose exec backend alembic upgrade head
+
+# Verify migration success
+docker-compose exec backend alembic current
 ```
 
-5. **Create admin user**
+### Step 5: Create Admin User
+
 ```bash
+# Create the admin user
 docker-compose exec backend python -c "
 from app.core.database import AsyncSessionLocal
 from app.models.user import User
@@ -254,70 +351,603 @@ import asyncio
 
 async def create_admin():
     async with AsyncSessionLocal() as db:
+        # Check if admin already exists
+        from sqlalchemy import select
+        result = await db.execute(select(User).where(User.email == 'admin@arkhon.com'))
+        existing = result.scalar_one_or_none()
+
+        if existing:
+            print('Admin user already exists')
+            return
+
         admin = User(
             email='admin@arkhon.com',
             username='admin',
             hashed_password=get_password_hash('admin123'),
-            full_name='Admin User',
+            full_name='System Administrator',
             role='admin',
             is_active=True
         )
         db.add(admin)
         await db.commit()
+        print('Admin user created successfully!')
+        print('Email: admin@arkhon.com')
+        print('Password: admin123')
+        print('⚠️  IMPORTANT: Change this password after first login!')
 
 asyncio.run(create_admin())
 "
 ```
 
-6. **Access the application**
-- Frontend: http://localhost:3000
-- Backend API: http://localhost:8000
-- API Docs: http://localhost:8000/docs
+### Step 6: Access the Application
 
-### Option 2: Manual Setup
+Open your browser and navigate to:
 
-#### Backend Setup
+- **Frontend:** http://localhost:3000
+- **Backend API:** http://localhost:8000
+- **API Documentation:** http://localhost:8000/docs
+- **OpenAPI Spec:** http://localhost:8000/redoc
+
+**Default Login Credentials:**
+- Email: `admin@arkhon.com`
+- Password: `admin123`
+
+⚠️ **Change the default password immediately after first login!**
+
+### Step 7: Verify Installation
 
 ```bash
-cd backend
+# Check backend logs
+docker-compose logs -f backend
 
-# Create virtual environment
-python -m venv venv
-source venv/bin/activate  # On Windows: venv\Scripts\activate
+# Check celery worker logs
+docker-compose logs -f celery-worker
 
-# Install dependencies
-pip install -r requirements.txt
+# Check frontend logs
+docker-compose logs -f frontend
 
-# Configure environment
-cp .env.example .env
-# Edit .env with your settings
-
-# Run migrations
-alembic upgrade head
-
-# Start backend
-uvicorn app.main:app --reload
-
-# In another terminal, start Celery worker
-celery -A app.workers.celery_app worker --loglevel=info
-
-# In another terminal, start Celery beat
-celery -A app.workers.celery_app beat --loglevel=info
+# View all logs
+docker-compose logs -f
 ```
 
-#### Frontend Setup
+### Common Docker Commands
 
 ```bash
-cd frontend
+# Stop all services
+docker-compose down
 
-# Install dependencies
-npm install
+# Stop and remove volumes (⚠️ deletes all data)
+docker-compose down -v
 
-# Configure environment
-echo "VITE_API_URL=http://localhost:8000/api/v1" > .env
+# Restart a specific service
+docker-compose restart backend
 
-# Start development server
-npm run dev
+# View logs for a specific service
+docker-compose logs -f backend
+
+# Execute commands in a container
+docker-compose exec backend bash
+
+# Rebuild containers after code changes
+docker-compose up -d --build
+
+# View resource usage
+docker stats
+```
+
+---
+
+## 🖥️ Server Installation & Configuration
+
+Complete guide for deploying to a production server.
+
+### Prerequisites
+
+- Ubuntu 20.04+ server with at least 2GB RAM
+- Root or sudo access
+- Domain name pointed to your server (optional)
+- Open ports: 80 (HTTP), 443 (HTTPS), 22 (SSH)
+
+### Step 1: Prepare the Server
+
+```bash
+# Update system packages
+sudo apt update && sudo apt upgrade -y
+
+# Install required packages
+sudo apt install -y git curl wget nano ufw
+
+# Configure firewall
+sudo ufw allow 22/tcp    # SSH
+sudo ufw allow 80/tcp    # HTTP
+sudo ufw allow 443/tcp   # HTTPS
+sudo ufw --force enable
+
+# Verify firewall status
+sudo ufw status
+```
+
+### Step 2: Install Docker
+
+```bash
+# Install Docker
+curl -fsSL https://get.docker.com -o get-docker.sh
+sudo sh get-docker.sh
+
+# Add your user to docker group
+sudo usermod -aG docker $USER
+
+# Install Docker Compose
+sudo curl -L "https://github.com/docker/compose/releases/latest/download/docker-compose-$(uname -s)-$(uname -m)" -o /usr/local/bin/docker-compose
+sudo chmod +x /usr/local/bin/docker-compose
+
+# Verify installations
+docker --version
+docker-compose --version
+
+# Logout and login again for group changes to take effect
+exit
+# SSH back into the server
+```
+
+### Step 3: Clone and Configure Application
+
+```bash
+# Create application directory
+sudo mkdir -p /opt/arkhon
+sudo chown $USER:$USER /opt/arkhon
+cd /opt/arkhon
+
+# Clone repository
+git clone https://github.com/your-org/arkhon.git .
+
+# Create production environment file
+cp backend/.env.example backend/.env
+nano backend/.env
+```
+
+**Production Environment Configuration:**
+
+```env
+# Application
+APP_NAME=Arkhon Integration Platform
+APP_VERSION=1.0.0
+DEBUG=False  # IMPORTANT: Must be False in production
+
+# Security - GENERATE NEW SECRET KEY!
+SECRET_KEY=CHANGE-THIS-TO-A-SECURE-RANDOM-STRING-AT-LEAST-32-CHARACTERS
+ALGORITHM=HS256
+ACCESS_TOKEN_EXPIRE_MINUTES=30
+REFRESH_TOKEN_EXPIRE_DAYS=7
+
+# Database - Use strong passwords!
+DATABASE_URL=postgresql+asyncpg://arkhon:STRONG_DB_PASSWORD_HERE@postgres:5432/arkhon
+
+# Redis
+REDIS_URL=redis://redis:6379/0
+CELERY_BROKER_URL=redis://redis:6379/0
+CELERY_RESULT_BACKEND=redis://redis:6379/0
+
+# CORS - Add your domain
+BACKEND_CORS_ORIGINS=["https://yourdomain.com","https://www.yourdomain.com"]
+
+# File Storage
+STORAGE_TYPE=local
+LOCAL_STORAGE_PATH=/app/storage
+
+# FTP Configuration
+BIGBUY_FTP_HOST=ftp.bigbuy.eu
+BIGBUY_FTP_PORT=21
+BIGBUY_FTP_USER=your-production-ftp-user
+BIGBUY_FTP_PASSWORD=your-production-ftp-password
+BIGBUY_FTP_PATH=/products
+
+# Import & Sync Settings
+CSV_CHUNK_SIZE=1000
+MAX_IMPORT_ERRORS=100
+OUTBOUND_RETRY_ATTEMPTS=3
+OUTBOUND_RETRY_DELAY=5
+
+# Logging
+LOG_LEVEL=INFO
+LOG_FORMAT=json
+```
+
+**Generate secure credentials:**
+```bash
+# Generate SECRET_KEY
+python3 -c "import secrets; print(secrets.token_urlsafe(32))"
+
+# Generate database password
+python3 -c "import secrets; print(secrets.token_urlsafe(24))"
+```
+
+### Step 4: Update Docker Compose for Production
+
+Create a production docker-compose override:
+
+```bash
+nano docker-compose.prod.yml
+```
+
+```yaml
+version: '3.8'
+
+services:
+  postgres:
+    restart: always
+    environment:
+      POSTGRES_PASSWORD: ${DB_PASSWORD}  # Use strong password from .env
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+
+  redis:
+    restart: always
+    command: redis-server --appendonly yes
+    volumes:
+      - redis_data:/data
+
+  backend:
+    restart: always
+    environment:
+      - DEBUG=False
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    volumes:
+      - storage_data:/app/storage
+
+  celery-worker:
+    restart: always
+    environment:
+      - DEBUG=False
+
+  celery-beat:
+    restart: always
+    environment:
+      - DEBUG=False
+
+  frontend:
+    restart: always
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      target: production
+    ports:
+      - "80:80"
+    environment:
+      - VITE_API_URL=https://yourdomain.com/api/v1
+
+volumes:
+  postgres_data:
+  redis_data:
+  storage_data:
+```
+
+### Step 5: Configure Nginx (Optional - for custom domain)
+
+If using a custom domain with SSL:
+
+```bash
+# Install Nginx
+sudo apt install -y nginx certbot python3-certbot-nginx
+
+# Create Nginx configuration
+sudo nano /etc/nginx/sites-available/arkhon
+```
+
+```nginx
+# Redirect HTTP to HTTPS
+server {
+    listen 80;
+    server_name yourdomain.com www.yourdomain.com;
+    return 301 https://$server_name$request_uri;
+}
+
+# HTTPS Configuration
+server {
+    listen 443 ssl http2;
+    server_name yourdomain.com www.yourdomain.com;
+
+    # SSL certificates (will be added by certbot)
+    ssl_certificate /etc/letsencrypt/live/yourdomain.com/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/yourdomain.com/privkey.pem;
+
+    # Frontend
+    location / {
+        proxy_pass http://localhost:3000;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection 'upgrade';
+        proxy_set_header Host $host;
+        proxy_cache_bypass $http_upgrade;
+    }
+
+    # Backend API
+    location /api {
+        proxy_pass http://localhost:8000;
+        proxy_http_version 1.1;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header Host $host;
+
+        # Increase timeouts for long-running requests
+        proxy_connect_timeout 600;
+        proxy_send_timeout 600;
+        proxy_read_timeout 600;
+        send_timeout 600;
+    }
+
+    # API Documentation
+    location /docs {
+        proxy_pass http://localhost:8000/docs;
+    }
+
+    # Security headers
+    add_header X-Frame-Options "SAMEORIGIN" always;
+    add_header X-Content-Type-Options "nosniff" always;
+    add_header X-XSS-Protection "1; mode=block" always;
+
+    # Gzip compression
+    gzip on;
+    gzip_vary on;
+    gzip_min_length 1024;
+    gzip_types text/plain text/css text/xml text/javascript application/x-javascript application/xml+rss application/javascript application/json;
+}
+```
+
+```bash
+# Enable site
+sudo ln -s /etc/nginx/sites-available/arkhon /etc/nginx/sites-enabled/
+sudo rm /etc/nginx/sites-enabled/default
+
+# Test configuration
+sudo nginx -t
+
+# Obtain SSL certificate
+sudo certbot --nginx -d yourdomain.com -d www.yourdomain.com
+
+# Restart Nginx
+sudo systemctl restart nginx
+
+# Enable auto-renewal
+sudo systemctl enable certbot.timer
+```
+
+### Step 6: Build and Start Production Services
+
+```bash
+cd /opt/arkhon
+
+# Build images
+docker-compose -f docker-compose.yml -f docker-compose.prod.yml build
+
+# Start services
+docker-compose -f docker-compose.yml -f docker-compose.prod.yml up -d
+
+# Verify all containers are running
+docker-compose ps
+```
+
+### Step 7: Initialize Production Database
+
+```bash
+# Run migrations
+docker-compose exec backend alembic upgrade head
+
+# Create admin user
+docker-compose exec backend python -c "
+from app.core.database import AsyncSessionLocal
+from app.models.user import User
+from app.core.security import get_password_hash
+import asyncio
+
+async def create_admin():
+    async with AsyncSessionLocal() as db:
+        from sqlalchemy import select
+        result = await db.execute(select(User).where(User.email == 'admin@arkhon.com'))
+        existing = result.scalar_one_or_none()
+
+        if existing:
+            print('Admin user already exists')
+            return
+
+        admin = User(
+            email='admin@arkhon.com',
+            username='admin',
+            hashed_password=get_password_hash('CHANGE_THIS_PASSWORD'),
+            full_name='System Administrator',
+            role='admin',
+            is_active=True
+        )
+        db.add(admin)
+        await db.commit()
+        print('Admin user created!')
+
+asyncio.run(create_admin())
+"
+```
+
+### Step 8: Configure Automated Backups
+
+```bash
+# Create backup script
+sudo nano /usr/local/bin/backup-arkhon.sh
+```
+
+```bash
+#!/bin/bash
+BACKUP_DIR="/opt/backups/arkhon"
+DATE=$(date +%Y%m%d_%H%M%S)
+
+mkdir -p $BACKUP_DIR
+
+# Backup database
+docker exec arkhon-postgres pg_dump -U arkhon arkhon | gzip > $BACKUP_DIR/db_$DATE.sql.gz
+
+# Backup storage files
+tar -czf $BACKUP_DIR/storage_$DATE.tar.gz /opt/arkhon/storage/
+
+# Keep only last 7 days of backups
+find $BACKUP_DIR -name "*.gz" -mtime +7 -delete
+
+echo "Backup completed: $DATE"
+```
+
+```bash
+# Make executable
+sudo chmod +x /usr/local/bin/backup-arkhon.sh
+
+# Add to crontab (daily at 2 AM)
+sudo crontab -e
+# Add this line:
+0 2 * * * /usr/local/bin/backup-arkhon.sh >> /var/log/arkhon-backup.log 2>&1
+```
+
+### Step 9: Setup Monitoring (Optional)
+
+```bash
+# Install monitoring tools
+sudo apt install -y htop nethogs
+
+# View system resources
+htop
+
+# Monitor Docker containers
+docker stats
+
+# View application logs
+docker-compose logs -f backend
+docker-compose logs -f celery-worker
+```
+
+### Step 10: Production Checklist
+
+✅ **Security:**
+- [ ] Changed default SECRET_KEY
+- [ ] Changed default admin password
+- [ ] Set DEBUG=False
+- [ ] Configured firewall (UFW)
+- [ ] SSL certificate installed
+- [ ] Strong database passwords
+- [ ] Updated CORS origins
+
+✅ **Services:**
+- [ ] All containers running
+- [ ] Database migrations applied
+- [ ] Admin user created
+- [ ] Celery workers operational
+- [ ] Celery beat scheduler running
+
+✅ **Monitoring:**
+- [ ] Automated backups configured
+- [ ] Log rotation setup
+- [ ] Health checks working
+- [ ] Error notifications configured
+
+✅ **Performance:**
+- [ ] Database indexed properly
+- [ ] Redis persistence enabled
+- [ ] Nginx caching configured
+- [ ] Connection pooling enabled
+
+### Maintenance Commands
+
+```bash
+# View logs
+docker-compose logs -f [service-name]
+
+# Restart services
+docker-compose restart
+
+# Update application
+cd /opt/arkhon
+git pull
+docker-compose build
+docker-compose up -d
+
+# Backup database manually
+docker exec arkhon-postgres pg_dump -U arkhon arkhon > backup.sql
+
+# Restore database
+cat backup.sql | docker exec -i arkhon-postgres psql -U arkhon arkhon
+
+# Clean up old images
+docker system prune -a
+
+# Monitor resource usage
+docker stats
+```
+
+### Troubleshooting
+
+**Services won't start:**
+```bash
+# Check logs
+docker-compose logs backend
+docker-compose logs postgres
+
+# Verify environment variables
+docker-compose config
+
+# Check disk space
+df -h
+```
+
+**Database connection errors:**
+```bash
+# Check PostgreSQL is running
+docker-compose ps postgres
+
+# Test database connection
+docker-compose exec postgres psql -U arkhon -d arkhon
+```
+
+**High memory usage:**
+```bash
+# Check resource usage
+docker stats
+
+# Restart services
+docker-compose restart
+
+# Adjust worker count in docker-compose.yml
+```
+
+---
+
+## 🔄 Updating the Application
+
+### Local (Docker):
+```bash
+cd arkhon
+git pull
+docker-compose down
+docker-compose up -d --build
+docker-compose exec backend alembic upgrade head
+```
+
+### Production Server:
+```bash
+cd /opt/arkhon
+
+# Backup first!
+/usr/local/bin/backup-arkhon.sh
+
+# Pull updates
+git pull
+
+# Rebuild and restart
+docker-compose -f docker-compose.yml -f docker-compose.prod.yml down
+docker-compose -f docker-compose.yml -f docker-compose.prod.yml build
+docker-compose -f docker-compose.yml -f docker-compose.prod.yml up -d
+
+# Run migrations
+docker-compose exec backend alembic upgrade head
+
+# Verify
+docker-compose ps
 ```
 
 ## 📚 API Documentation
